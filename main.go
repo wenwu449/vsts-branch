@@ -106,14 +106,26 @@ type root struct {
 	Versions []version `xml:"versions>version"`
 }
 
-type defintion struct {
+type definition struct {
 	ID int `json:"id"`
 }
 
 type build struct {
-	Definition   defintion `json:"definition"`
-	SourceBranch string    `json:"sourceBranch"`
-	Parameters   string    `json:"parameters"`
+	Definition   definition `json:"definition"`
+	SourceBranch string     `json:"sourceBranch"`
+	Parameters   string     `json:"parameters"`
+}
+
+type definitions struct {
+	Count int `json:"count"`
+	Value []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+		URL  string `json:"url"`
+		URI  string `json:"uri"`
+		Path string `json:"path"`
+		Type string `json:"type"`
+	} `json:"value"`
 }
 
 func main() {
@@ -145,9 +157,9 @@ func main() {
 		"{branch}", relBranch,
 		"{version}", "1.0")
 
-	url := r.Replace(getBranchURLTemplate)
+	urlString := r.Replace(getBranchURLTemplate)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", urlString, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -177,9 +189,9 @@ func main() {
 			"{branch}", secrets.MasterBranch,
 			"{version}", "1.0")
 
-		url := r.Replace(getBranchURLTemplate)
+		urlString := r.Replace(getBranchURLTemplate)
 
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest("GET", urlString, nil)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -222,11 +234,11 @@ func main() {
 			"{repository}", secrets.Repo,
 			"{version}", "1.0")
 
-		url = r.Replace(postBranchURLTemplate)
+		urlString = r.Replace(postBranchURLTemplate)
 		body := new(bytes.Buffer)
 		json.NewEncoder(body).Encode([]ref{newBranch})
 
-		req, err = http.NewRequest("POST", url, body)
+		req, err = http.NewRequest("POST", urlString, body)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -255,9 +267,9 @@ func main() {
 		"{versionPath}", secrets.VersionPath,
 		"{version}", "1.0")
 
-	url = r.Replace(getItemURLTemplate)
+	urlString = r.Replace(getItemURLTemplate)
 
-	req, err = http.NewRequest("GET", url, nil)
+	req, err = http.NewRequest("GET", urlString, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -305,9 +317,9 @@ func main() {
 			"{toDateTime}", string(toText),
 			"{version}", "1.0")
 
-		url = r.Replace(getCommitsURLTemplate)
+		urlString = r.Replace(getCommitsURLTemplate)
 
-		req, err = http.NewRequest("GET", url, nil)
+		req, err = http.NewRequest("GET", urlString, nil)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -335,9 +347,9 @@ func main() {
 				"{versionPath}", secrets.VersionPath,
 				"{version}", "1.0")
 
-			url = r.Replace(getItemURLTemplate)
+			urlString = r.Replace(getItemURLTemplate)
 
-			req, err = http.NewRequest("GET", url, nil)
+			req, err = http.NewRequest("GET", urlString, nil)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -363,10 +375,12 @@ func main() {
 
 			if versions := strings.Split(versionXML.Versions[0].Value, "."); versions[len(versions)-2] != build {
 				fmt.Printf("Found: Commit %s: %+v\n", commit.CommitID, versionXML.Versions[0].Value)
+
 				return
 			}
 		}
 		fmt.Printf("No version reset found in %v days.\n", daysLookBack)
+
 		// reset version
 		versions := strings.Split(versionXML.Versions[0].Value, ".")
 		buildNum, err := strconv.Atoi(build)
@@ -386,7 +400,7 @@ func main() {
 			"{repository}", secrets.Repo,
 			"{version}", "2.0-preview")
 
-		url = r.Replace(postPushURLTemplate)
+		urlString = r.Replace(postPushURLTemplate)
 
 		versionResetPush := push{
 			RefUpdates: []refUpdate{
@@ -416,7 +430,7 @@ func main() {
 		body := new(bytes.Buffer)
 		json.NewEncoder(body).Encode(versionResetPush)
 
-		req, err = http.NewRequest("POST", url, body)
+		req, err = http.NewRequest("POST", urlString, body)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -432,54 +446,105 @@ func main() {
 		fmt.Println(resp.Status)
 	}
 
-	// check build definition
+	// check master branch version
 
-	// create build definition
-	postBuildURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/build/builds?api-version={version}"
+	// submit PR
+
+	// check PR
+
+	// merge PR
+
+BUILDDEF:
+	// check build definition
+	getDefinitionsURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/build/definitions?api-version={version}&path={path}&name={definitionName}"
 	r = strings.NewReplacer(
 		"{instance}", secrets.Instance,
 		"{project}", secrets.Project,
-		"{version}", "2.0")
+		"{version}", "3.0-preview.2",
+		"{path}", fmt.Sprintf("%s\\%s", secrets.DefinitionPathPrefix, relBranch),
+		"{definitionName}", secrets.DefinitionName)
 
-	url = r.Replace(postBuildURLTemplate)
+	urlString = r.Replace(getDefinitionsURLTemplate)
 
-	onboardBuild := build{
-		Definition: defintion{
-			ID: secrets.OnboardBuildDefinitionID,
-		},
-		SourceBranch: fmt.Sprintf("%s/%s", "refs/heads", "master"),
-		Parameters:   fmt.Sprintf("{\"GitRepositoryName\":\"Compute-CloudShell\",\"GitBranchName\":\"%s\"}", relBranch),
-	}
-	body := new(bytes.Buffer)
-	json.NewEncoder(body).Encode(onboardBuild)
-
-	req, err = http.NewRequest("POST", url, body)
+	req, err = http.NewRequest("GET", urlString, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	req.SetBasicAuth(secrets.Username, secrets.Password)
-	req.Header.Set("Content-Type", "application/json")
 
-	//resp, err = client.Do(req)
+	resp, err = client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
 
-	fmt.Println("Onboarding...")
+	defs := definitions{}
 	fmt.Println(resp.Status)
+	json.NewDecoder(resp.Body).Decode(&defs)
+
+	fmt.Printf("%v\n", defs.Count)
+
+	if defs.Count < 1 {
+		// create build definition
+		postBuildURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/build/builds?api-version={version}"
+		r = strings.NewReplacer(
+			"{instance}", secrets.Instance,
+			"{project}", secrets.Project,
+			"{version}", "2.0")
+
+		urlString = r.Replace(postBuildURLTemplate)
+
+		onboardBuild := build{
+			Definition: definition{
+				ID: secrets.OnboardBuildDefinitionID,
+			},
+			SourceBranch: fmt.Sprintf("%s/%s", "refs/heads", "master"),
+			Parameters:   fmt.Sprintf("{\"GitRepositoryName\":\"Compute-CloudShell\",\"GitBranchName\":\"%s\"}", relBranch),
+		}
+		body := new(bytes.Buffer)
+		json.NewEncoder(body).Encode(onboardBuild)
+
+		req, err = http.NewRequest("POST", urlString, body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		req.SetBasicAuth(secrets.Username, secrets.Password)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = client.Do(req)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		fmt.Println("Onboarding...")
+		fmt.Println(resp.Status)
+		time.Sleep(30 * time.Second)
+		goto BUILDDEF
+	}
+
+	buildDefID := defs.Value[0].ID
+	for _, def := range defs.Value {
+		if def.Name == secrets.DefinitionName {
+			buildDefID = def.ID
+			break
+		}
+	}
+
+	fmt.Printf("%v\n", buildDefID)
+
 	// check build
 
 	// create build
 	relBuild := build{
-		Definition: defintion{
+		Definition: definition{
 			ID: 20606,
 		},
 		SourceBranch: fmt.Sprintf("%s/%s", "refs/heads", relBranch),
 	}
-	body = new(bytes.Buffer)
+	body := new(bytes.Buffer)
 	json.NewEncoder(body).Encode(relBuild)
-	req, err = http.NewRequest("POST", url, body)
+	req, err = http.NewRequest("POST", urlString, body)
 	if err != nil {
 		log.Fatal(err)
 	}
