@@ -26,7 +26,8 @@ type secrets struct {
 	VersionPath              string `json:"versionPath"`
 	DefinitionPathPrefix     string `json:"definitionPathPrefix"`
 	DefinitionName           string `json:"definitionName"`
-	OnboardBuildDefinitionID int    `json:"OnboardBuildDefinitionId"`
+	OnboardBuildDefinitionID int    `json:"onboardBuildDefinitionId"`
+	UserID                   string `json:"userId"`
 }
 
 type ref struct {
@@ -49,17 +50,7 @@ type branch struct {
 type commits struct {
 	Count int `json:"count"`
 	Value []struct {
-		CommitID string `json:"commitId"`
-		Author   struct {
-			Name  string    `json:"name"`
-			Email string    `json:"email"`
-			Date  time.Time `json:"date"`
-		} `json:"author"`
-		Committer struct {
-			Name  string    `json:"name"`
-			Email string    `json:"email"`
-			Date  time.Time `json:"date"`
-		} `json:"committer"`
+		CommitID     string `json:"commitId"`
 		Comment      string `json:"comment"`
 		ChangeCounts struct {
 			Add int `json:"Add"`
@@ -89,14 +80,14 @@ type change struct {
 	NewContent newContent `json:"newContent"`
 }
 
-type commit struct {
+type pushCommit struct {
 	Comment string   `json:"comment"`
 	Changes []change `json:"changes"`
 }
 
 type push struct {
-	RefUpdates []refUpdate `json:"refUpdates"`
-	Commits    []commit    `json:"commits"`
+	RefUpdates []refUpdate  `json:"refUpdates"`
+	Commits    []pushCommit `json:"commits"`
 }
 
 type version struct {
@@ -149,6 +140,91 @@ type builds struct {
 		Parameters    string    `json:"parameters"`
 		KeepForever   bool      `json:"keepForever"`
 	} `json:"value"`
+}
+
+type pullRequests struct {
+	Value []struct {
+		PullRequestID      int       `json:"pullRequestId"`
+		CodeReviewID       int       `json:"codeReviewId"`
+		Status             string    `json:"status"`
+		CreationDate       time.Time `json:"creationDate"`
+		Title              string    `json:"title"`
+		Description        string    `json:"description"`
+		SourceRefName      string    `json:"sourceRefName"`
+		TargetRefName      string    `json:"targetRefName"`
+		MergeStatus        string    `json:"mergeStatus"`
+		MergeID            string    `json:"mergeId"`
+		URL                string    `json:"url"`
+		SupportsIterations bool      `json:"supportsIterations"`
+	} `json:"value"`
+	Count int `json:"count"`
+}
+
+type pullRequest struct {
+	SourceRefName string `json:"sourceRefName"`
+	TargetRefName string `json:"targetRefName"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+}
+
+type lastMergeSourceCommit struct {
+	CommitID string `json:"commitId"`
+}
+
+type completionOptions struct {
+	DeleteSourceBranch string `json:"deleteSourceBranch"`
+	MergeCommitMessage string `json:"mergeCommitMessage"`
+	SquashMerge        string `json:"squashMerge"`
+	BypassPolicy       string `json:"bypassPolicy"`
+}
+
+type patchPullRequest struct {
+	Status                string                `json:"status"`
+	LastMergeSourceCommit lastMergeSourceCommit `json:"lastMergeSourceCommit"`
+	CompletionOptions     completionOptions     `json:"completionOptions"`
+}
+
+type diffs struct {
+	AllChangesIncluded bool `json:"allChangesIncluded"`
+	ChangeCounts       struct {
+		Edit int `json:"Edit"`
+	} `json:"changeCounts"`
+	Changes []struct {
+		Item struct {
+			ObjectID         string `json:"objectId"`
+			OriginalObjectID string `json:"originalObjectId"`
+			GitObjectType    string `json:"gitObjectType"`
+			CommitID         string `json:"commitId"`
+			Path             string `json:"path"`
+			IsFolder         bool   `json:"isFolder"`
+			URL              string `json:"url"`
+		} `json:"item"`
+		ChangeType string `json:"changeType"`
+	} `json:"changes"`
+	CommonCommit string `json:"commonCommit"`
+	BaseCommit   string `json:"baseCommit"`
+	TargetCommit string `json:"targetCommit"`
+	AheadCount   int    `json:"aheadCount"`
+	BehindCount  int    `json:"behindCount"`
+}
+
+type commit struct {
+	CommitID     string `json:"commitId"`
+	ChangeCounts struct {
+		Edit int `json:"Edit"`
+	} `json:"changeCounts"`
+	Changes []struct {
+		Item struct {
+			ObjectID         string `json:"objectId"`
+			OriginalObjectID string `json:"originalObjectId"`
+			GitObjectType    string `json:"gitObjectType"`
+			CommitID         string `json:"commitId"`
+			Path             string `json:"path"`
+			IsFolder         bool   `json:"isFolder"`
+			URL              string `json:"url"`
+		} `json:"item"`
+		ChangeType string `json:"changeType"`
+	} `json:"changes"`
 }
 
 var secret = secrets{}
@@ -297,14 +373,14 @@ func getCommits(client *http.Client, relBranch string, startTime time.Time, endT
 	return commits
 }
 
-func getBranchVersionXML(client *http.Client, relBranch string) root {
+func getBranchVersionXML(client *http.Client, branch string) root {
 	getItemURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/git/repositories/{repository}/items?api-version={version}&versionType={versionType}&version={versionValue}&scopePath={versionPath}&lastProcessedChange=true"
 	r := strings.NewReplacer(
 		"{instance}", secret.Instance,
 		"{project}", secret.Project,
 		"{repository}", secret.Repo,
 		"{versionType}", "branch",
-		"{versionValue}", relBranch,
+		"{versionValue}", branch,
 		"{versionPath}", secret.VersionPath,
 		"{version}", "1.0")
 
@@ -396,7 +472,7 @@ func resetBuildVersion(client *http.Client, versionXML root, build string, relBr
 				OldObjectID: commitID,
 			},
 		},
-		Commits: []commit{
+		Commits: []pushCommit{
 			{
 				Comment: "Reset version for release",
 				Changes: []change{
@@ -430,6 +506,7 @@ func resetBuildVersion(client *http.Client, versionXML root, build string, relBr
 	}
 	defer resp.Body.Close()
 
+	fmt.Printf("Reset version in %s\n", relBranch)
 	fmt.Println(resp.Status)
 }
 
@@ -563,6 +640,300 @@ func postBuild(client *http.Client, relBranch string, buildDefID int) {
 	fmt.Println(resp.Status)
 }
 
+func getPullRequests(client *http.Client, targetBranch string, sourceBranch string) pullRequests {
+	getPullRequestsURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/git/repositories/{repository}/pullRequests?api-version={version}&status={status}&sourceRefName={sourceBranch}&targetRefName={targetBranch}"
+	r := strings.NewReplacer(
+		"{instance}", secret.Instance,
+		"{project}", secret.Project,
+		"{repository}", secret.Repo,
+		"{version}", "3.0-preview",
+		"{status}", "Active",
+		"{sourceBranch}", fmt.Sprintf("%s/%s", "refs/heads", sourceBranch),
+		"{targetBranch}", fmt.Sprintf("%s/%s", "refs/heads", targetBranch))
+
+	urlString := r.Replace(getPullRequestsURLTemplate)
+
+	req, err := http.NewRequest("GET", urlString, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.SetBasicAuth(secret.Username, secret.Password)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	pullRequests := pullRequests{}
+
+	json.NewDecoder(resp.Body).Decode(&pullRequests)
+
+	return pullRequests
+}
+
+func submitPullRequest(client *http.Client, sourceBranch string, targetBranch string, title string, description string) {
+	postPullRequestURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/git/repositories/{repository}/pullRequests?api-version={version}"
+	r := strings.NewReplacer(
+		"{instance}", secret.Instance,
+		"{project}", secret.Project,
+		"{repository}", secret.Repo,
+		"{version}", "3.0-preview")
+
+	urlString := r.Replace(postPullRequestURLTemplate)
+
+	pullRequest := pullRequest{
+		SourceRefName: fmt.Sprintf("%s/%s", "refs/heads", sourceBranch),
+		TargetRefName: fmt.Sprintf("%s/%s", "refs/heads", targetBranch),
+		Title:         title,
+		Description:   description,
+	}
+	body := new(bytes.Buffer)
+	json.NewEncoder(body).Encode(pullRequest)
+	req, err := http.NewRequest("POST", urlString, body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.SetBasicAuth(secret.Username, secret.Password)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Starting PR from %s to %s...\n", sourceBranch, targetBranch)
+	fmt.Println(resp.Status)
+}
+
+func getDiffsBetweenBranches(client *http.Client, baseBranch string, targetBranch string) diffs {
+	getDiffsURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/git/repositories/{repository}/diffs/commits?api-version={version}&targetVersionType=branch&targetVersion={targetBranch}&baseVersionType=branch&baseVersion={baseBranch}"
+	r := strings.NewReplacer(
+		"{instance}", secret.Instance,
+		"{project}", secret.Project,
+		"{repository}", secret.Repo,
+		"{version}", "1.0",
+		"{baseBranch}", baseBranch,
+		"{targetBranch}", targetBranch)
+
+	urlString := r.Replace(getDiffsURLTemplate)
+
+	req, err := http.NewRequest("GET", urlString, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.SetBasicAuth(secret.Username, secret.Password)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	diffs := diffs{}
+
+	json.NewDecoder(resp.Body).Decode(&diffs)
+
+	return diffs
+}
+
+func getCommit(client *http.Client, commitID string) commit {
+	getCommitURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/git/repositories/{repository}/commits/{commitId}?api-version={version}&changeCount={changeCount}"
+	r := strings.NewReplacer(
+		"{instance}", secret.Instance,
+		"{project}", secret.Project,
+		"{repository}", secret.Repo,
+		"{version}", "1.0",
+		"{commitId}", commitID,
+		"changeCount", "100")
+
+	urlString := r.Replace(getCommitURLTemplate)
+
+	req, err := http.NewRequest("GET", urlString, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.SetBasicAuth(secret.Username, secret.Password)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	commit := commit{}
+
+	json.NewDecoder(resp.Body).Decode(&commit)
+	return commit
+}
+
+func completePullRequest(client *http.Client, pullRequestID int, commitID string, mergeMessage string, bypassPolicy bool, deleteSourceBranch bool) {
+	patchPullRequestURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/git/repositories/{repository}/pullRequests/{pullRequest}?api-version={version}"
+
+	r := strings.NewReplacer(
+		"{instance}", secret.Instance,
+		"{project}", secret.Project,
+		"{repository}", secret.Repo,
+		"{pullRequest}", strconv.Itoa(pullRequestID),
+		"{version}", "3.0-preview")
+
+	urlString := r.Replace(patchPullRequestURLTemplate)
+
+	patchPullRequest := patchPullRequest{
+		Status: "completed",
+		LastMergeSourceCommit: lastMergeSourceCommit{
+			CommitID: commitID,
+		},
+		CompletionOptions: completionOptions{
+			MergeCommitMessage: mergeMessage,
+			SquashMerge:        strconv.FormatBool(true),
+			DeleteSourceBranch: strconv.FormatBool(deleteSourceBranch),
+			BypassPolicy:       strconv.FormatBool(bypassPolicy),
+		},
+	}
+
+	body := new(bytes.Buffer)
+	json.NewEncoder(body).Encode(patchPullRequest)
+	req, err := http.NewRequest("PATCH", urlString, body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.SetBasicAuth(secret.Username, secret.Password)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Complete PR %v...\n", pullRequestID)
+	fmt.Println(resp.Status)
+}
+
+func updateMasterVersion(done chan bool, build string, relBranch string) {
+	client := &http.Client{}
+
+	// check master branch version
+	versionXML := getBranchVersionXML(client, secret.MasterBranch)
+
+	if len(versionXML.Versions) != 1 {
+		fmt.Printf("Error version xml: %+v\n", versionXML)
+		done <- false
+		return
+	}
+
+	versions := strings.Split(versionXML.Versions[0].Value, ".")
+	if build != versions[len(versions)-2] {
+		// check PR
+		pullRequests := getPullRequests(client, secret.MasterBranch, relBranch)
+
+		if pullRequests.Count == 0 {
+			// submit PR
+			submitPullRequest(client, relBranch, secret.MasterBranch, "Reset version for release", "Reset version for release")
+			time.Sleep(10 * time.Second)
+			pullRequests = getPullRequests(client, secret.MasterBranch, relBranch)
+		}
+
+		if pullRequests.Count == 0 {
+			fmt.Println("Error: No PR found after submit PR.")
+			done <- false
+			return
+		}
+
+		if pullRequests.Count > 1 {
+			fmt.Printf("Error: %v PRs found. PR IDs:", pullRequests.Count)
+			for _, pr := range pullRequests.Value {
+				fmt.Printf("%v, ", pr.PullRequestID)
+			}
+			done <- false
+			return
+		}
+
+		// check diff
+		diffs := getDiffsBetweenBranches(client, secret.MasterBranch, relBranch)
+
+		if diffs.BehindCount != 0 || diffs.AheadCount != 1 {
+			fmt.Printf("Cannot merge PR from %s to %s\n", relBranch, secret.MasterBranch)
+			fmt.Printf("Diff between %s and %s, %+v\n", secret.MasterBranch, relBranch, diffs)
+			done <- false
+			return
+		}
+
+		path := ""
+		for _, change := range diffs.Changes {
+			if !strings.HasPrefix(secret.VersionPath, change.Item.Path) {
+				path = change.Item.Path
+				break
+			}
+		}
+
+		if path != "" {
+			fmt.Printf("Branch %s has change other than version file: %s\n", relBranch, path)
+			done <- false
+			return
+		}
+
+		// complete PR
+		completePullRequest(client, pullRequests.Value[0].PullRequestID, diffs.TargetCommit, pullRequests.Value[0].Title, true, false)
+
+		done <- true
+	}
+}
+
+func startBuild(done chan bool, relBranch string) {
+	client := &http.Client{}
+
+	// check build definition
+	defs := getBuildDefinitions(client, relBranch)
+
+	fmt.Printf("Found build definitions: %v\n", defs.Count)
+
+	if defs.Count < 1 {
+		// create build definition
+		onboardBuildDefinition(client, relBranch)
+
+		i := 0
+		for ; i < 10; i++ {
+			time.Sleep(30 * time.Second)
+			defs = getBuildDefinitions(client, relBranch)
+			fmt.Printf("%v\n", defs.Count)
+			if defs.Count >= 1 {
+				break
+			}
+		}
+
+		if i >= 10 {
+			fmt.Printf("No build definitions after %v seconds...\n", i*30)
+			done <- false
+			return
+		}
+	}
+
+	buildDefID := defs.Value[0].ID
+	for _, def := range defs.Value {
+		if def.Name == secret.DefinitionName {
+			buildDefID = def.ID
+			break
+		}
+	}
+
+	fmt.Printf("Build definition ID: %v\n", buildDefID)
+
+	// check build
+	builds := getBuilds(client, buildDefID)
+	fmt.Printf("Found build: %v\n", builds.Count)
+	if builds.Count < 1 {
+		// create build
+		postBuild(client, relBranch, buildDefID)
+	}
+
+	done <- true
+}
+
 func main() {
 	// read secrets
 	file, _ := os.Open("secrets.json")
@@ -606,9 +977,11 @@ func main() {
 		return
 	}
 
-	if versions := strings.Split(versionXML.Versions[0].Value, "."); versions[len(versions)-1] != "0" {
+	versions := strings.Split(versionXML.Versions[0].Value, ".")
+	build := versions[len(versions)-2]
+
+	if versions[len(versions)-1] != "0" {
 		fmt.Println(versionXML.Versions[0].Value)
-		build := versions[len(versions)-2]
 		// check commits
 		n = time.Now()
 		daysLookBack := 1 + (int(n.Weekday())+6)%7
@@ -623,8 +996,9 @@ func main() {
 				fmt.Printf("Found more than one version, commit %s: %+v\n", commit.CommitID, versionXML)
 			}
 
-			if versions := strings.Split(versionXML.Versions[0].Value, "."); versions[len(versions)-2] != build {
-				fmt.Printf("Found: Commit %s: %+v\n", commit.CommitID, versionXML.Versions[0].Value)
+			versions = strings.Split(versionXML.Versions[0].Value, ".")
+			if versions[len(versions)-2] != build {
+				fmt.Printf("Found version before fork: Commit %s: %+v\n", commit.CommitID, versionXML.Versions[0].Value)
 
 				return
 			}
@@ -635,54 +1009,12 @@ func main() {
 		resetBuildVersion(client, versionXML, build, relBranch, commitID)
 	}
 
-	// check master branch version
-
-	// submit PR
-
-	// check PR
-
-	// merge PR
-
-	// check build definition
-	defs := getBuildDefinitions(client, relBranch)
-
-	fmt.Printf("%v\n", defs.Count)
-
-	if defs.Count < 1 {
-		// create build definition
-		onboardBuildDefinition(client, relBranch)
-
-		i := 0
-		for ; i < 10; i++ {
-			time.Sleep(30 * time.Second)
-			defs = getBuildDefinitions(client, relBranch)
-			fmt.Printf("%v\n", defs.Count)
-			if defs.Count >= 1 {
-				break
-			}
-		}
-
-		if i >= 10 {
-			fmt.Printf("No build definitions after %v seconds...\n", i*30)
-			return
-		}
-	}
-
-	buildDefID := defs.Value[0].ID
-	for _, def := range defs.Value {
-		if def.Name == secret.DefinitionName {
-			buildDefID = def.ID
-			break
-		}
-	}
-
-	fmt.Printf("%v\n", buildDefID)
-
-	// check build
-	builds := getBuilds(client, buildDefID)
-	fmt.Println(builds.Count)
-	if builds.Count < 1 {
-		// create build
-		postBuild(client, relBranch, buildDefID)
-	}
+	uChan := make(chan bool)
+	sChan := make(chan bool)
+	go updateMasterVersion(uChan, build, relBranch)
+	go startBuild(sChan, relBranch)
+	uDone := <-uChan
+	sDone := <-sChan
+	fmt.Printf("update master version succeeded: %v\n", uDone)
+	fmt.Printf("start build succeeded: %v\n", sDone)
 }
