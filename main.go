@@ -27,7 +27,6 @@ type secrets struct {
 	DefinitionPathPrefix     string `json:"definitionPathPrefix"`
 	DefinitionName           string `json:"definitionName"`
 	OnboardBuildDefinitionID int    `json:"onboardBuildDefinitionId"`
-	UserID                   string `json:"userId"`
 }
 
 type ref struct {
