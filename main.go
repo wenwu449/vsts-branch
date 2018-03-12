@@ -813,7 +813,7 @@ func completePullRequest(client *http.Client, pullRequestID int, commitID string
 	fmt.Println(resp.Status)
 }
 
-func updateMasterVersion(done chan bool, build string, relBranch string) {
+func updateMasterVersion(done chan<- bool, build string, relBranch string) {
 	client := &http.Client{}
 
 	// check master branch version
