@@ -12,6 +12,5 @@ FROM alpine
 RUN apk add --no-cache ca-certificates
 WORKDIR /vsts-branch
 COPY --from=build-env /go/src/github.com/wenwu449/vsts-branch/vsts-branch .
-COPY ./secrets.json .
 
 CMD ["./vsts-branch"]
