@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -935,14 +936,29 @@ func startBuild(done chan bool, relBranch string) {
 
 func main() {
 	// read secrets
-	file, _ := os.Open("secrets.json")
+	secretPathString := os.Getenv("SECRET_PATH")
+	if len(secretPathString) == 0 {
+		fmt.Println("env SECRET_PATH not found.")
+		return
+	}
+
+	file, _ := os.Open(secretPathString)
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	err := decoder.Decode(&secret)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(secret.Username)
+	fmt.Printf("Secret from env var: %s\n", secret.Username)
+
+	branchDayPtr := flag.Int("branchDay", 5, "The day of week to branch")
+
+	flag.Parse()
+
+	if *branchDayPtr < 0 || *branchDayPtr > 6 {
+		fmt.Println("-branchDay should between 0 and 6")
+		return
+	}
 
 	client := &http.Client{}
 
@@ -950,7 +966,7 @@ func main() {
 	commitID := "0000000000000000000000000000000000000000"
 
 	n := time.Now()
-	releaseDate := n.AddDate(0, 0, -1*((int(n.Weekday())+6)%7))
+	releaseDate := n.AddDate(0, 0, (*branchDayPtr-7-int(n.Weekday()))%7)
 	y, m, d := releaseDate.Date()
 	relBranch := fmt.Sprintf("%s%v%02v%02v", secret.ReleaseBranchPrefix, y, int(m), d)
 	fmt.Println(relBranch)
@@ -983,9 +999,9 @@ func main() {
 		fmt.Println(versionXML.Versions[0].Value)
 		// check commits
 		n = time.Now()
-		daysLookBack := 1 + (int(n.Weekday())+6)%7
+		daysLookBack := (*branchDayPtr-7-int(n.Weekday()))%7 - 1
 
-		commits := getCommits(client, relBranch, n.AddDate(0, 0, -1*daysLookBack), n)
+		commits := getCommits(client, relBranch, n.AddDate(0, 0, daysLookBack), n)
 		fmt.Println(commits.Count)
 
 		for _, commit := range commits.Value {
