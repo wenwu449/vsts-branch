@@ -446,11 +446,7 @@ func getCommitVersionXML(client *http.Client, commitID string) root {
 
 func resetBuildVersion(client *http.Client, versionXML root, build string, relBranch string, commitID string) {
 	versions := strings.Split(versionXML.Versions[0].Value, ".")
-	buildNum, err := strconv.Atoi(build)
-	if err != nil {
-		log.Fatal(err)
-	}
-	versions[len(versions)-2] = strconv.Itoa(buildNum + 1)
+	versions[len(versions)-2] = build
 	versions[len(versions)-1] = "0"
 	versionXML.Versions[0].Value = strings.Join(versions, ".")
 	fmt.Printf("Reset version to: %s\n", versionXML.Versions[0].Value)
@@ -511,6 +507,7 @@ func resetBuildVersion(client *http.Client, versionXML root, build string, relBr
 }
 
 func getBuildDefinitions(client *http.Client, relBranch string) definitions {
+	relBranch = strings.Replace(relBranch, "/", "_", -1)
 	getDefinitionsURLTemplate := "https://{instance}/DefaultCollection/{project}/_apis/build/definitions?api-version={version}&path={path}&name={definitionName}"
 	r := strings.NewReplacer(
 		"{instance}", secret.Instance,
@@ -879,9 +876,10 @@ func updateMasterVersion(done chan<- bool, build string, relBranch string) {
 
 		// complete PR
 		completePullRequest(client, pullRequests.Value[0].PullRequestID, diffs.TargetCommit, pullRequests.Value[0].Title, true, false)
-
-		done <- true
+	} else {
+		fmt.Printf("%s branch is already version: %s\n", secret.MasterBranch, versionXML.Versions[0].Value)
 	}
+	done <- true
 }
 
 func startBuild(done chan bool, relBranch string) {
@@ -932,6 +930,14 @@ func startBuild(done chan bool, relBranch string) {
 	}
 
 	done <- true
+}
+
+func bumpBuildNum(build string) string {
+	buildNum, err := strconv.Atoi(build)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return strconv.Itoa(buildNum + 1)
 }
 
 func main() {
@@ -995,11 +1001,13 @@ func main() {
 	versions := strings.Split(versionXML.Versions[0].Value, ".")
 	build := versions[len(versions)-2]
 
+	fmt.Printf("%s branch is at: %s\n", relBranch, versionXML.Versions[0].Value)
+
 	if versions[len(versions)-1] != "0" {
-		fmt.Println(versionXML.Versions[0].Value)
+		resetted := false
 		// check commits
 		n = time.Now()
-		daysLookBack := (*branchDayPtr-7-int(n.Weekday()))%7 - 1
+		daysLookBack := (*branchDayPtr-7-int(n.Weekday()))%7 - 2
 
 		commits := getCommits(client, relBranch, n.AddDate(0, 0, daysLookBack), n)
 		fmt.Println(commits.Count)
@@ -1014,14 +1022,17 @@ func main() {
 			versions = strings.Split(versionXML.Versions[0].Value, ".")
 			if versions[len(versions)-2] != build {
 				fmt.Printf("Found version before fork: Commit %s: %+v\n", commit.CommitID, versionXML.Versions[0].Value)
-
-				return
+				resetted = true
+				break
 			}
 		}
-		fmt.Printf("No version reset found in %v days.\n", daysLookBack)
+		if !resetted {
+			fmt.Printf("No version reset found in %v days.\n", daysLookBack)
 
-		// reset version
-		resetBuildVersion(client, versionXML, build, relBranch, commitID)
+			// reset version
+			build = bumpBuildNum(build)
+			resetBuildVersion(client, versionXML, build, relBranch, commitID)
+		}
 	}
 
 	uChan := make(chan bool)
